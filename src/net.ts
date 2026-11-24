@@ -191,7 +191,7 @@ export class Net implements Shared {
         game?.remoteHurt(m.damage, m.fromX, m.cause);
         break;
       case "hits":
-        if (m.events.length) game?.note(m.events.join("; "));
+        game?.hits(m.events, m.kills ?? 0);
         break;
       case "clock":
         game?.syncClock(m.hour, m.day, m.asleep, m.online);

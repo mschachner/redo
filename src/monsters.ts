@@ -102,12 +102,20 @@ export class Monster {
   private phase: "roam" | "windup" | "charge" | "rest" = "roam";
   private chargeDir = 0;
 
+  /**
+   * How many times its kind's base health it has: 1 at the origin, 2.5 at 2,000 cells out,
+   * 4 at 6,000. Players' swings grow with their stacks, so monsters out in the wilds have
+   * to grow a lot to keep up.
+   */
+  readonly level: number;
+
   /** `wild` is the wildness where it spawned: more health, speed, sight and damage. */
-  constructor(readonly kind: MonsterKind, x: number, y: number, wild = 0) {
+  constructor(readonly kind: MonsterKind, x: number, y: number, readonly wild = 0) {
     this.x = this.prevX = x;
     this.y = this.prevY = y;
     const d = MONSTERS[kind];
-    this.hp = Math.round(d.hp * (1 + 0.4 * wild));
+    this.level = 1 + 1.5 * wild;
+    this.hp = Math.round(d.hp * this.level);
     this.speed = d.speed * (1 + 0.1 * wild);
     this.sight = d.sight + 2 * wild;
     this.damage = 1 + Math.floor(wild / 2.5);
@@ -115,6 +123,11 @@ export class Monster {
 
   get def(): MonsterDef {
     return MONSTERS[this.kind];
+  }
+
+  /** How large it's drawn: bigger the stronger it is (its box stays one cell). */
+  get scale(): number {
+    return Math.pow(this.level, 0.35);
   }
 
   /** A charger about to charge, drawn in a warning color. */

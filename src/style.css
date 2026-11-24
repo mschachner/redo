@@ -129,11 +129,6 @@ body.hints .console-hint {
   box-shadow: 0 16px 48px rgba(0, 0, 0, 0.45);
 }
 
-/* A tighter card for a short list of options, like the main menu. */
-.plate.compact {
-  padding: 16px 32px 16px 20px;
-}
-
 .plate .controls td:last-child {
   color: #aea6b9;
 }
@@ -144,6 +139,120 @@ body.hints .console-hint {
 
 .overlay.hidden {
   display: none;
+}
+
+/* The main menu sits at the left, over a plum scrim that blurs the world more strongly
+   there and fades out toward the right, so the options read over any sky. */
+#menu {
+  align-items: flex-start;
+  padding-left: 7%;
+  background: none;
+  isolation: isolate;
+}
+
+#menu::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background: linear-gradient(
+    90deg,
+    rgba(30, 14, 40, 0.78) 0%,
+    rgba(30, 14, 40, 0.66) 30%,
+    rgba(30, 14, 40, 0.26) 58%,
+    rgba(30, 14, 40, 0.08) 100%
+  );
+  -webkit-backdrop-filter: blur(20px);
+  backdrop-filter: blur(20px);
+  -webkit-mask-image: linear-gradient(90deg, #000 0%, #000 38%, transparent 70%);
+  mask-image: linear-gradient(90deg, #000 0%, #000 38%, transparent 70%);
+}
+
+#menu .choices button {
+  color: #a8a0b4;
+}
+
+#menu .choices button:focus,
+#menu .choices button:hover,
+#menu .choices button.open {
+  color: var(--text);
+}
+
+/* With one of its screens open, the menu is a header at the top left: the title, smaller,
+   and the chosen option with its caret turned down. The other options are out of the way.
+   (dock.ts animates between the two layouts.) */
+#menu.open {
+  justify-content: flex-start;
+  gap: 8px;
+  padding-top: 34px;
+}
+
+#menu.open .title {
+  margin: 0;
+  font-size: 12px;
+}
+
+#menu.open .choices button:not(.open) {
+  position: absolute;
+  top: 0;
+  left: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+
+#menu .choices button.open::before {
+  color: var(--accent);
+  transform: rotate(90deg);
+}
+
+/* A screen open beneath its main menu option: no card, just its contents over the scrim,
+   lined up with the option. Its buttons' carets fall under the option's caret, and
+   everything else under the option's name. */
+.overlay.docked {
+  --muted: #a8a0b4;
+  --dim: #7d7689;
+  align-items: flex-start;
+  justify-content: flex-start;
+  padding: var(--dock-top, 190px) 0 16px 7%;
+  background: none;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  pointer-events: none;
+}
+
+.overlay.docked .plate {
+  align-items: flex-start;
+  gap: 16px;
+  min-height: 0;
+  /* The card scrolls, which clips to its edges; a little room on every side (taken back by
+     the margin) keeps the borders of inputs at its edges from being cut off. */
+  margin: -6px;
+  padding: 6px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--dim) transparent;
+  background: none;
+  border: none;
+  box-shadow: none;
+  pointer-events: auto;
+}
+
+.overlay.docked h2 {
+  display: none;
+}
+
+.overlay.docked .plate > :not(.choices, .new-world) {
+  margin-left: 29.6px; /* a button's padding plus its caret */
+}
+
+/* A closed screen stays in view just long enough to fade out. */
+.overlay.hidden.closing {
+  display: flex;
+}
+
+.overlay.closing .plate {
+  pointer-events: none;
 }
 
 .title {
@@ -172,10 +281,16 @@ body.hints .console-hint {
   outline: none;
 }
 
-/* The selected item gets a terminal-style marker; the space keeps items aligned. */
+/* The selected item gets a terminal-style marker. It's always there, so items stay
+   aligned, and it turns to point down on a main menu option whose screen is open. */
 .choices button::before {
-  content: "  ";
-  white-space: pre;
+  content: ">";
+  display: inline-block;
+  flex: none;
+  width: 2ch;
+  color: transparent;
+  transform-origin: 0.5ch 54%;
+  transition: transform 0.28s cubic-bezier(0.3, 0, 0.2, 1) 0.14s;
 }
 
 .choices button:focus-visible,
@@ -185,7 +300,6 @@ body.hints .console-hint {
 }
 
 .choices button:focus::before {
-  content: "> ";
   color: var(--accent);
 }
 
@@ -260,9 +374,31 @@ kbd {
 }
 
 /* Saved worlds: one row each, the name on the left and when it was played on the right. */
-.worlds-top {
+/* New world, with its seed beside it: empty for a random one. */
+.new-world {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   width: 30em;
   margin-bottom: -14px;
+}
+
+.new-world .field {
+  width: auto;
+}
+
+.new-world .field input {
+  width: 14em;
+}
+
+.seed-status {
+  margin: 0;
+  font-size: 14px;
+  color: var(--danger);
+}
+
+.seed-status:empty {
+  display: none;
 }
 
 .world-list {
@@ -422,7 +558,7 @@ body.hints .seed-hint {
   display: flex;
   flex-direction: column;
   gap: 6px;
-  width: 20em;
+  width: 22.5em; /* thirteen options to a row, so the twelve colors fit on one */
   color: var(--muted);
   outline: none;
   cursor: default;

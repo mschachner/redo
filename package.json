@@ -11,6 +11,7 @@
     "deploy": "deploy/cuboid.sh && deploy/site.sh",
     "deploy:cuboid": "deploy/cuboid.sh",
     "deploy:site": "deploy/site.sh",
+    "reset-world": "deploy/reset-world.sh",
     "preview": "vite preview"
   },
   "devDependencies": {

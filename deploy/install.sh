@@ -21,7 +21,9 @@ sudo install -d -m 750 -o redo -g redo /srv/redo/data
 
 # A seed given to the deploy is kept for the server's first start, if there's no world yet.
 if [[ -n "${SEED:-}" && ! -e /srv/redo/data/world.json ]]; then
-  echo "SEED=$SEED" | sudo tee /etc/default/redo >/dev/null
+  sudo touch /etc/default/redo
+  sudo sed -i '/^SEED=/d' /etc/default/redo
+  echo "SEED=$SEED" | sudo tee -a /etc/default/redo >/dev/null
 fi
 
 echo "== installing the build"

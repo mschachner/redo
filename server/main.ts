@@ -31,6 +31,7 @@ import { Block, BLOCKS, isSolid } from "../src/blocks";
 import { BEDTIME, DAY_SECONDS, LAMP, START_HOUR, sunLevel } from "../src/clock";
 import { LightField } from "../src/light";
 import { readLook } from "../src/looks";
+import { swingStrength } from "../src/stack";
 import { attackArea, MONSTER_KINDS, Population, SPAWN_RANGE_X, SPAWN_RANGE_Y, spawnCap, spawnInterval } from "../src/population";
 import { MAX_NAME, MAX_TEXT } from "../src/protocol";
 import type { Change, ClientMessage, Facing, MonsterInfo, PlayerInfo, PlayerState, ServerMessage } from "../src/protocol";
@@ -258,8 +259,12 @@ function handle(player: Player, m: ClientMessage): void {
       const now = Date.now();
       if (now < player.attackAt || !FACINGS.includes(m.facing) || player.asleep) break;
       player.attackAt = now + ATTACK_GAP_MS;
-      const events = population.hit(attackArea(player.x, player.y, m.facing), player.x, player.y);
-      send(player.socket, { t: "hits", events });
+      // One point of damage per empty stack slot, as of the stack the player last sent.
+      const kept = states.get(player.key);
+      const damage = kept ? swingStrength(kept.keptSlots, kept.daySlots, kept.undo.length) : 1;
+      if (damage <= 0) break;
+      const { events, kills } = population.hit(attackArea(player.x, player.y, m.facing), player.x, player.y, damage);
+      send(player.socket, { t: "hits", events, kills });
       break;
     }
     case "rest":
@@ -392,7 +397,7 @@ setInterval(() => {
     const list: MonsterInfo[] = [];
     for (const m of population.monsters) {
       if (Math.abs(m.x - p.x) > MONSTER_VIEW || Math.abs(m.y - p.y) > MONSTER_VIEW) continue;
-      list.push([m.id, MONSTER_KINDS.indexOf(m.kind), Math.round(m.x * 100) / 100, Math.round(m.y * 100) / 100, m.hurt > 0 ? 1 : 0, m.winding ? 1 : 0]);
+      list.push([m.id, MONSTER_KINDS.indexOf(m.kind), Math.round(m.x * 100) / 100, Math.round(m.y * 100) / 100, m.hurt > 0 ? 1 : 0, m.winding ? 1 : 0, Math.round(m.wild * 100) / 100]);
     }
     send(p.socket, { t: "monsters", list });
   }

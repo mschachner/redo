@@ -181,6 +181,12 @@ export class Terrain {
     return t > 0.2 + 0.6 * fbm2(this.seed + 93, x / 7, y / 7, 2) ? b : a;
   }
 
+  /** How much of `biome` column x has: 1 inside it, falling to 0 across a border. */
+  biomeWeight(x: number, biome: Biome): number {
+    const [a, b, t] = this.blend(x);
+    return (a === biome ? 1 - t : 0) + (b === biome ? t : 0);
+  }
+
   skyColor(x: number): RGB {
     return this.mix(x, (b) => BIOMES[b].sky);
   }
@@ -628,16 +634,16 @@ export class Terrain {
 
   /**
    * Stack pickups, each on the floor of an open cell: day slots fairly often, half on the
-   * surface and half in caves; keep slots rarely, always underground.
+   * surface and half in caves; keep slots now and then, always underground.
    */
   private pickups(c: Canvas): void {
     this.anchors(c, 48, 700, 0, (x, r) => {
       if (r() < 0.4) return;
       this.placePickup(c, x, r() < 0.5 ? undefined : 14 + Math.floor(r() * 120), Block.DayStack);
     }, 0);
-    this.anchors(c, 420, 710, 0, (x, r) => {
-      if (r() < 0.45) return;
-      this.placePickup(c, x, 24 + Math.floor(r() * 150), Block.KeepStack);
+    this.anchors(c, 170, 710, 0, (x, r) => {
+      if (r() < 0.35) return;
+      this.placePickup(c, x, 16 + Math.floor(r() * 130), Block.KeepStack);
     }, 0);
   }
 

@@ -1,6 +1,6 @@
 import { Block, BLOCKS, isLiquid, isSolid } from "./blocks";
 import { Action, CellChange, History } from "./history";
-import type { Change } from "./protocol";
+import type { Change, MonsterInfo } from "./protocol";
 import { Input } from "./input";
 import type { LightField } from "./light";
 import { DEFAULT_LOOK, type Look } from "./looks";
@@ -8,6 +8,7 @@ import { boxesOverlap, Monster } from "./monsters";
 import { attackArea, HIT_KNOCKBACK, MONSTER_KINDS, Population, spawnCap, spawnInterval } from "./population";
 import { BEDTIME, DAY_SECONDS, SLEEPY_HOUR, START_HOUR } from "./clock";
 import { Fog } from "./fog";
+import { BASE_STACK, swingStrength } from "./stack";
 import { flood } from "./water";
 import { World, WORLD_H } from "./world";
 
@@ -86,12 +87,7 @@ const BROADCAST_BASE = 6;
 const FOG_RANGE_X = 48;
 const FOG_RANGE_Y = 34;
 
-/**
- * The most actions the undo stack holds to begin with; pickups add to it. When it's full,
- * new actions (and attacks) are refused until something is undone. (A new action clears
- * the redo stack, so the two stacks together never hold more than the limit either.)
- */
-export const BASE_STACK = 4;
+export { BASE_STACK } from "./stack";
 /** How long the screen takes to fade back in after sleeping (seconds). */
 export const REST_FADE = 1.2;
 export type Dir = "up" | "down" | "left" | "right";
@@ -132,10 +128,11 @@ export interface LogLine {
   age: number;
 }
 
-/** A recent attack, drawn briefly as a slash in front of the player. */
+/** A recent attack, drawn briefly as a slash in front of the player: thicker when stronger. */
 export interface Swing {
   facing: Dir;
   t: number;
+  strength: number;
 }
 
 export class Inventory {
@@ -207,6 +204,9 @@ export class Game {
   day = 0;
   /** Real seconds spent playing this world. */
   playTime = 0;
+  /** Seconds left showing the basic controls, in a world just created, out of introTotal. */
+  introTime = 0;
+  readonly introTotal = 10;
   /** The latest broadcast, while its banner is showing. */
   broadcastShown: { text: string; t: number; total: number } | undefined;
   /** Seconds until the player can broadcast again. */
@@ -227,7 +227,7 @@ export class Game {
     return this.input.held.has("ShiftLeft") || this.input.held.has("ShiftRight");
   }
   /** Walking into a one-cell ledge climbs it automatically. */
-  autoStep = true;
+  autoStep = false;
   /** The server, in a shared world; undefined when playing alone. */
   shared: Shared | undefined;
   /** The other players, in a shared world. */
@@ -476,6 +476,7 @@ export class Game {
 
   update(dt: number): void {
     this.playTime += dt;
+    this.introTime = Math.max(0, this.introTime - dt);
     this.restFade = Math.max(0, this.restFade - dt);
     this.world.campfireLit = this.campfireLit;
     if (!this.atCampfire()) this.cameToFire = true;
@@ -593,9 +594,10 @@ export class Game {
         this.note("Can't attack with a full stack");
         return;
       }
+      const strength = this.strength;
       const result = this.attack();
       const broke = result === "none" && this.breakTarget();
-      if (result !== "cooldown" && !broke) this.swing = { facing: this.player.facing, t: SWING_TIME };
+      if (result !== "cooldown" && !broke) this.swing = { facing: this.player.facing, t: SWING_TIME, strength };
     }
     else if (code === "KeyK") this.placeTarget();
     else if (code === "KeyU") this.undo();
@@ -630,8 +632,8 @@ export class Game {
   }
 
   /**
-   * Attack whatever is in reach. In a shared world the server decides what's hit (and
-   * reports back for the log); alone, it happens here.
+   * Attack whatever is in reach. In a shared world the server decides what's hit and
+   * reports back (to hits); alone, it happens here.
    */
   private attack(): "hit" | "cooldown" | "none" {
     const p = this.player;
@@ -639,8 +641,23 @@ export class Game {
     if (this.attackCooldown > 0) return "cooldown";
     this.attackCooldown = ATTACK_COOLDOWN;
     if (this.shared) this.shared.attack(p.facing);
-    else this.note(this.population.hit(this.attackArea(), p.x, p.y).join("; "));
+    else {
+      const { events, kills } = this.population.hit(this.attackArea(), p.x, p.y, this.strength);
+      this.hits(events, kills);
+    }
     return "hit";
+  }
+
+  /** A swing's damage: one for each empty stack slot. */
+  get strength(): number {
+    return swingStrength(this.keptSlots, this.daySlots, this.history.undoStack.length);
+  }
+
+  /** What an attack did: noted in the log. Each kill earns a stack slot until sleep. */
+  hits(events: string[], kills: number): void {
+    this.daySlots += kills;
+    if (kills) events = [...events, kills > 1 ? `+${kills} stack until you sleep` : "+1 stack until you sleep"];
+    if (events.length) this.note(events.join("; "));
   }
 
   /** The region J attacks: a strip just past the player's facing edge. */
@@ -1007,14 +1024,14 @@ export class Game {
    * The server's monsters, as [id, kind, x, y, hurt, winding]: new ones appear, gone ones
    * vanish, and the rest are moved toward their new positions.
    */
-  syncMonsters(list: [number, number, number, number, number, number][]): void {
+  syncMonsters(list: MonsterInfo[]): void {
     const byId = new Map(this.monsters.map((m) => [m.id, m]));
     const next: Monster[] = [];
     this.mirrorTargets.clear();
-    for (const [id, kind, x, y, hurt, winding] of list) {
+    for (const [id, kind, x, y, hurt, winding, wild] of list) {
       let m = byId.get(id);
       if (!m) {
-        m = new Monster(MONSTER_KINDS[kind], x, y);
+        m = new Monster(MONSTER_KINDS[kind], x, y, wild ?? 0);
         m.id = id;
       }
       m.hurt = hurt ? 0.18 : Math.min(m.hurt, 0);

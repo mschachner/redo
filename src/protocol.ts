@@ -49,8 +49,11 @@ export interface PlayerState {
   redo: WireAction[];
 }
 
-/** A monster as the server reports it: id, kind (index into MONSTER_KINDS), x, y, hurt, winding up. */
-export type MonsterInfo = [number, number, number, number, number, number];
+/**
+ * A monster as the server reports it: id, kind (index into MONSTER_KINDS), x, y, hurt,
+ * winding up, and the wildness where it spawned (which sets its strength and size).
+ */
+export type MonsterInfo = [number, number, number, number, number, number, number];
 
 /** From the page to the server. */
 export type ClientMessage =
@@ -88,7 +91,7 @@ export type ServerMessage =
   | { t: "broadcast"; name: string; text: string }
   | { t: "monsters"; list: MonsterInfo[] }
   | { t: "hurt"; damage: number; fromX: number; cause: string }
-  | { t: "hits"; events: string[] }
+  | { t: "hits"; events: string[]; kills: number }
   | { t: "clock"; hour: number; day: number; asleep: number; online: number }
   | { t: "morning"; hour: number; day: number };
 

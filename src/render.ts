@@ -4,9 +4,11 @@ import { BASE_STACK, Dir, Game, MAX_HP, REST_FADE, SWING_TIME } from "./game";
 import { LightField, MAX_LIGHT } from "./light";
 import type { Look } from "./looks";
 import { MONSTERS } from "./monsters";
+import { ATTACK_REACH } from "./population";
 import { regionName } from "./names";
 import { BIOMES } from "./biomes";
 import { hash2, rand2 } from "./noise";
+import { drawWeather } from "./weather";
 import { World, WORLD_H } from "./world";
 import { SEA } from "./worldgen";
 
@@ -342,6 +344,27 @@ export class Renderer {
     ctx.imageSmoothingQuality = "low"; // plain bilinear: no overshoot halos at hard edges
     ctx.drawImage(this.backdropCanvas, sx(baseX - 1), sy(baseY - 1), bw * cell, bh * cell);
 
+    // Weather in the open sky, behind everything drawn in pass 2.
+    ctx.font = `${Math.round(cell * 0.8)}px ${FONT}`;
+    drawWeather({
+      ctx,
+      cell,
+      camX,
+      camY,
+      cols,
+      rows,
+      time: this.time,
+      day,
+      seed,
+      sx,
+      sy,
+      weight: (x, biome) => terrain.biomeWeight(x, biome),
+      sky: (x, y) => {
+        const i = x - (baseX - 1);
+        return i >= 0 && i < bw && y < surface[i] - 0.5 && world.get(x, y) === Block.Air && !game.fog.hidden(x, y);
+      },
+    });
+
     // Pass 2: solid blocks as sharp cells, and every glyph.
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
@@ -543,7 +566,11 @@ export class Renderer {
       const lit = (ch: Int8Array): number => Math.max(MONSTER_MIN_LIGHT, li >= 0 ? ch[li] : 0);
       const flashing = m.hurt > 0 || (m.winding && Math.floor(this.time * 16) % 2 === 0);
       ctx.fillStyle = flashing ? COLOR.hurt : this.shade(MONSTERS[m.kind].color, lit(lightR), lit(lightG), lit(lightB));
-      this.outlinedText(MONSTERS[m.kind].glyph, this.snap(sx(mx)) + cell / 2, this.snap(sy(my)) + cell / 2 + 1);
+      // Stronger monsters are drawn larger, growing up from where they stand.
+      const scale = m.scale;
+      ctx.font = `bold ${Math.round(cell * 0.9 * scale)}px ${FONT}`;
+      const lift = (scale - 1) * cell * 0.4;
+      this.outlinedText(MONSTERS[m.kind].glyph, this.snap(sx(mx)) + cell / 2, this.snap(sy(my)) + cell / 2 + 1 - lift);
     }
 
     // Other players: their own character, with their name and anything they've said.
@@ -569,12 +596,21 @@ export class Renderer {
     // Attack swing: a short arc on the facing side, fading out.
     if (game.swing) {
       const angle = { right: 0, down: Math.PI / 2, left: Math.PI, up: -Math.PI / 2 }[game.swing.facing];
-      ctx.strokeStyle = COLOR.cursor;
       ctx.globalAlpha = Math.max(0, game.swing.t / SWING_TIME);
-      ctx.lineWidth = 2;
+      ctx.lineCap = "round";
       ctx.beginPath();
-      ctx.arc(ppx + cell / 2, ppy + cell / 2, cell * 1.15, angle - 0.9, angle + 0.9);
+      // Sized to the attack area: out past the player's edge, and wider than the player.
+      ctx.arc(ppx + cell / 2, ppy + cell / 2, cell * (0.55 + ATTACK_REACH * 0.7), angle - 1.05, angle + 1.05);
+      // Thicker for a stronger swing. A dark underlay, as for the cursor, keeps it visible
+      // against any background.
+      const width = Math.min(cell * 0.32, 1 + game.swing.strength * cell * 0.045);
+      ctx.strokeStyle = COLOR.outline;
+      ctx.lineWidth = width + 3;
       ctx.stroke();
+      ctx.strokeStyle = COLOR.cursor;
+      ctx.lineWidth = width;
+      ctx.stroke();
+      ctx.lineCap = "butt";
       ctx.globalAlpha = 1;
     }
 
@@ -617,7 +653,57 @@ export class Renderer {
       this.drawLog(game, panelTop);
       this.drawHeld(game);
       this.drawBroadcast(game);
+      if (this.hints) this.drawIntro(game);
     }
+  }
+
+  /** In a world just created: the basic controls, across the top center, fading out. */
+  private drawIntro(game: Game): void {
+    const left = game.introTime;
+    if (left <= 0) return;
+    const { ctx, cell } = this;
+    const items: [string[], string][] = [
+      [["A", "D"], "move"],
+      [["W"], "jump"],
+      [["J"], "break"],
+      [["K"], "place"],
+      [["U"], "undo"],
+      [["I"], "redo"],
+    ];
+    ctx.save();
+    ctx.globalAlpha = Math.min(1, (game.introTotal - left) / 0.5, left / 1.2);
+    const labelFont = `${Math.round(cell * 0.62)}px ${FONT}`;
+    ctx.textBaseline = "middle";
+    ctx.textAlign = "left";
+    // A key cap's width, measured as keyCap draws it.
+    const capW = (label: string): number => {
+      ctx.font = `${Math.round(cell * 0.58)}px ${FONT}`;
+      const width = Math.max(cell * 0.95, ctx.measureText(label).width + cell * 0.45);
+      ctx.font = labelFont;
+      return width;
+    };
+    ctx.font = labelFont;
+    const keyGap = cell * 0.2;
+    const labelGap = cell * 0.35;
+    const itemGap = cell * 1.1;
+    const widths = items.map(([keys, label]) => keys.reduce((w, k) => w + capW(k) + keyGap, -keyGap) + labelGap + ctx.measureText(label).width);
+    const pad = cell * 0.8;
+    const w = widths.reduce((a, b) => a + b, 0) + itemGap * (items.length - 1) + pad * 2;
+    const h = cell * 1.7;
+    const x0 = (COLS * cell - w) / 2;
+    const y0 = cell * 0.75;
+    this.box(x0, y0, w, h);
+    const mid = y0 + h / 2;
+    let x = x0 + pad;
+    items.forEach(([keys, label], i) => {
+      for (const k of keys) x = this.keyCap(k, x, mid) + keyGap;
+      x += labelGap - keyGap;
+      ctx.font = labelFont;
+      ctx.fillStyle = COLOR.text;
+      ctx.fillText(label, x, mid + 1);
+      x += ctx.measureText(label).width + (i < items.length - 1 ? itemGap : 0);
+    });
+    ctx.restore();
   }
 
   /**
@@ -630,8 +716,15 @@ export class Renderer {
     const { ctx, cell } = this;
     const t = this.time;
     const font = ctx.font;
-    const put = (ch: string, x: number, y: number, size: number, color: string): void => {
+    const put = (ch: string, x: number, y: number, size: number, color: string, outline = false): void => {
       ctx.font = `${Math.round(cell * size)}px ${FONT}`;
+      if (outline) {
+        // A dark edge, as for players, so it shows against any background.
+        ctx.lineJoin = "round";
+        ctx.lineWidth = Math.max(3, cell * 0.2);
+        ctx.strokeStyle = COLOR.outline;
+        ctx.strokeText(ch, x, y);
+      }
       ctx.fillStyle = color;
       ctx.fillText(ch, x, y);
     };
@@ -641,12 +734,12 @@ export class Renderer {
     const mid = cx + cell / 2;
 
     // Logs.
-    put("=", mid, cy + cell * 0.84, 0.8, "#8a5a44");
+    put("=", mid, cy + cell * 0.84, 0.8, "#c08a64", true);
     if (!lit) {
       // A wisp of smoke, rising slowly and fading.
       const u = (t % 3.2) / 3.2;
-      ctx.globalAlpha = 0.55 * Math.sin(Math.PI * u);
-      put("~", mid + Math.sin(t * 1.7) * cell * 0.12, cy + cell * (0.55 - 1.2 * u), 0.7, "#b8b0c0");
+      ctx.globalAlpha = 0.8 * Math.sin(Math.PI * u);
+      put("~", mid + Math.sin(t * 1.7) * cell * 0.12, cy + cell * (0.55 - 1.2 * u), 0.7, "#d8d0e0", true);
       ctx.restore();
       ctx.font = font;
       return;

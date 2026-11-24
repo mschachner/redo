@@ -5,8 +5,9 @@ import type { Facing } from "./protocol";
 import { World } from "./world";
 import { wildness, WORLD_H } from "./worldgen";
 
-/** How far past the player's facing edge J reaches (cells). */
-export const ATTACK_REACH = 1.25;
+/** How far past the player's facing edge J reaches, and how far to either side (cells). */
+export const ATTACK_REACH = 1.6;
+export const ATTACK_SPREAD = 0.5;
 /** How hard a hit knocks a monster back, and a monster's touch knocks the player back. */
 export const ATTACK_KNOCKBACK = 9;
 export const HIT_KNOCKBACK = 10;
@@ -20,17 +21,20 @@ const DESPAWN_DISTANCE = 72;
 /** How close (cells) counts as near a player, for the monster cap. */
 const NEARBY = 60;
 
-/** The region J attacks for a player at (x, y): a strip ATTACK_REACH deep past their facing edge. */
+/**
+ * The region J attacks for a player at (x, y): ATTACK_REACH deep past their facing edge,
+ * and ATTACK_SPREAD wider than the player on either side.
+ */
 export function attackArea(x: number, y: number, facing: Facing): [number, number, number, number] {
   switch (facing) {
     case "right":
-      return [x + 1, y, x + 1 + ATTACK_REACH, y + 1];
+      return [x + 1, y - ATTACK_SPREAD, x + 1 + ATTACK_REACH, y + 1 + ATTACK_SPREAD];
     case "left":
-      return [x - ATTACK_REACH, y, x, y + 1];
+      return [x - ATTACK_REACH, y - ATTACK_SPREAD, x, y + 1 + ATTACK_SPREAD];
     case "down":
-      return [x, y + 1, x + 1, y + 1 + ATTACK_REACH];
+      return [x - ATTACK_SPREAD, y + 1, x + 1 + ATTACK_SPREAD, y + 1 + ATTACK_REACH];
     case "up":
-      return [x, y - ATTACK_REACH, x + 1, y];
+      return [x - ATTACK_SPREAD, y - ATTACK_REACH, x + 1 + ATTACK_SPREAD, y];
   }
 }
 
@@ -97,20 +101,22 @@ export class Population {
    * Hit every monster in a region, knocking it away from (fromX, fromY). Returns what
    * happened, for the activity log.
    */
-  hit(area: [number, number, number, number], fromX: number, fromY: number): string[] {
+  hit(area: [number, number, number, number], fromX: number, fromY: number, damage: number): { events: string[]; kills: number } {
     const events: string[] = [];
+    let kills = 0;
     for (const m of this.inArea(area)) {
-      m.hp -= 1;
+      m.hp -= damage;
       m.hurt = 0.18;
       m.knockFrom(fromX, fromY, ATTACK_KNOCKBACK);
       if (m.hp <= 0) {
         this.monsters.splice(this.monsters.indexOf(m), 1);
         events.push(`Killed ${m.def.name}`);
+        kills++;
       } else {
         events.push(`Hit ${m.def.name}`);
       }
     }
-    return events;
+    return { events, kills };
   }
 
   /** Remove monsters that a block now overlaps. Returns what happened, for the log. */

@@ -1,3 +1,4 @@
+import { Dock } from "./dock";
 import { Game } from "./game";
 
 /** The console's modes, in the order Tab cycles through them. */
@@ -30,17 +31,17 @@ import { World } from "./world";
  */
 const SERVER = new URL(import.meta.env.VITE_REDO_SERVER || location.origin);
 
-/** A seed given in the page URL (?seed=…), if any. */
-function seedFromUrl(): string | undefined {
-  const given = new URL(window.location.href).searchParams.get("seed");
-  return given ? normalizeSeed(given) : undefined;
-}
-
-/** Record the current world's seed in the URL, so it can be revisited. */
-function showSeedInUrl(seed: string): void {
+/**
+ * A seed given in a link (?seed=…), if any. It's taken out of the address once read, so
+ * reloading the page doesn't bring it back.
+ */
+function seedFromLink(): string | undefined {
   const url = new URL(window.location.href);
-  url.searchParams.set("seed", seed);
+  const given = url.searchParams.get("seed");
+  if (given === null) return undefined;
+  url.searchParams.delete("seed");
   window.history.replaceState(null, "", url);
+  return normalizeSeed(given);
 }
 
 /** Wire a settings checkbox to the game, remembering its value in this browser. */
@@ -100,7 +101,7 @@ async function main(): Promise<void> {
   const canvas = document.getElementById("screen") as HTMLCanvasElement;
   const input = new Input(window);
   const renderer = new Renderer(canvas);
-  let autoStep = true;
+  let autoStep = false;
   let look = storedLook();
 
   /** The world being played; undefined until one is started or loaded. */
@@ -110,7 +111,6 @@ async function main(): Promise<void> {
   let gameName = "";
   /** The world as it was saved when it was opened, for "Don't save" to put back. */
   let openedAs: Snapshot | undefined;
-  let pendingSeed = seedFromUrl();
   let sinceSave = 0;
 
   const newGame = (seed: string): Game => {
@@ -127,7 +127,7 @@ async function main(): Promise<void> {
     renderer.hints = on;
     document.body.classList.toggle("hints", on);
   });
-  bindSetting("auto-step", "redo.autoStep", true, (on) => {
+  bindSetting("auto-step", "redo.autoStep", false, (on) => {
     autoStep = on;
     if (game) game.autoStep = on;
   });
@@ -139,6 +139,8 @@ async function main(): Promise<void> {
   const worlds = document.getElementById("worlds")!;
   const worldList = document.getElementById("world-list")!;
   const worldsHint = worlds.querySelector(".worlds-hint")!;
+  const newSeed = document.getElementById("new-seed") as HTMLInputElement;
+  const newSeedStatus = document.getElementById("new-seed-status")!;
   const settings = document.getElementById("settings")!;
   const savePrompt = document.getElementById("save-prompt")!;
   const join = document.getElementById("join")!;
@@ -168,10 +170,25 @@ async function main(): Promise<void> {
   /** Where Settings goes back to: the main menu or the pause menu. */
   let settingsFrom: Screen = "menu";
 
-  /** Show a screen. The menus show the paused game behind them, or the demo world. */
-  const show = (next: Screen): void => {
+  // The main menu's own screens open beneath the option that leads to them.
+  const OPTION: Partial<Record<Screen, string>> = { worlds: "singleplayer", join: "multiplayer", character: "character", settings: "settings" };
+  const dock = new Dock(
+    menu,
+    menu.querySelector<HTMLElement>(".title")!,
+    [...menu.querySelectorAll<HTMLElement>(".choices button")],
+  );
+
+  /**
+   * Show a screen. The menus show the paused game behind them, or the demo world. Going
+   * between the main menu and one of its screens is animated, unless `instant`.
+   */
+  const show = (next: Screen, instant = false): void => {
+    const prev = screen;
+    const from = dock.option;
     screen = next;
-    menu.classList.toggle("hidden", next !== "menu");
+    // Settings opens under the main menu, but as a card of its own from the pause menu.
+    const docked = OPTION[next] !== undefined && (next !== "settings" || settingsFrom === "menu");
+    menu.classList.toggle("hidden", next !== "menu" && !docked);
     pause.classList.toggle("hidden", next !== "pause");
     character.classList.toggle("hidden", next !== "character");
     worlds.classList.toggle("hidden", next !== "worlds");
@@ -185,6 +202,11 @@ async function main(): Promise<void> {
     if (game) game.light = renderer.light;
     const overlay = overlayFor(next);
     if (next === "worlds") listSavedWorlds();
+    dock.set(
+      docked ? menu.querySelector<HTMLElement>(`[data-action="${OPTION[next]}"]`)! : undefined,
+      docked ? overlay : undefined,
+      !instant && (docked ? prev === "menu" : next === "menu" && from !== undefined),
+    );
     // On the world list, start on the most recently played world, if there is one; on
     // the join screen, in the name field.
     if (next === "join") {
@@ -195,7 +217,8 @@ async function main(): Promise<void> {
         .catch(() => undefined);
       joinName.focus();
       joinName.select();
-    } else if (overlay) (overlay === worlds ? worldRows()[0] ?? buttons(worlds)[0] : buttons(overlay)[0])?.focus();
+    } else if (next === "menu") (from ?? buttons(menu)[0])?.focus(); // back on the option just closed
+    else if (overlay) (overlay === worlds ? worldRows()[0] ?? buttons(worlds)[0] : buttons(overlay)[0])?.focus();
     else (document.activeElement as HTMLElement | null)?.blur();
   };
 
@@ -244,12 +267,24 @@ async function main(): Promise<void> {
     game.look = look;
     openedAs = id ? snapshot(id) : undefined;
     game.autoStep = autoStep;
-    if (!g.shared) showSeedInUrl(g.world.seedName);
     seedText.textContent = g.world.seedName;
     renderer.reset();
     game.light = renderer.light;
     (window as unknown as { game: Game }).game = game; // for poking at from the console
     show("playing");
+  };
+
+  /** Start a new world from the seed field, or a random one if it's empty. */
+  const newWorld = (): void => {
+    const typed = newSeed.value.trim();
+    const seed = typed ? normalizeSeed(typed) : randomSeedName();
+    if (!seed) {
+      newSeedStatus.textContent = "seed needs letters";
+      return;
+    }
+    newSeed.value = "";
+    newSeedStatus.textContent = "";
+    startWorld(seed);
   };
 
   /** Leave the world being played (saved, or for a shared one, left) for the main menu. */
@@ -266,6 +301,7 @@ async function main(): Promise<void> {
   const startWorld = (seed: string): void => {
     saveGame();
     const g = newGame(seed);
+    g.introTime = g.introTotal; // the basic controls, shown when keybind hints are on
     play(g, undefined, worldName(g));
   };
 
@@ -455,8 +491,11 @@ async function main(): Promise<void> {
     );
 
   const act = (action: string | undefined): void => {
-    if (action === "singleplayer") {
+    // Picking the open option again closes it, like a dropdown.
+    if (dock.option && dock.option.dataset.action === action) show("menu");
+    else if (action === "singleplayer") {
       saveGame(); // so the world being played is listed as it is now
+      newSeedStatus.textContent = "";
       show("worlds");
     } else if (action === "multiplayer") {
       joinStatus.textContent = "";
@@ -466,8 +505,7 @@ async function main(): Promise<void> {
     } else if (action === "join") {
       joinServer();
     } else if (action === "new-world") {
-      startWorld(pendingSeed ?? randomSeedName());
-      pendingSeed = undefined;
+      newWorld();
     } else if (action === "save-new") startWorld(randomSeedName());
     else if (action === "discard-new") discardAndStart();
     else if (action === "cancel-new") show("playing");
@@ -483,7 +521,7 @@ async function main(): Promise<void> {
     // Pointing at an item focuses it, on real movement only: the browser also reports the
     // pointer entering whatever the layout moves under it, which shouldn't take the place of
     // the keyboard.
-    b.addEventListener("mousemove", () => !b.disabled && document.activeElement !== b && b.focus());
+    b.addEventListener("mousemove", () => !b.disabled && !b.classList.contains("open") && document.activeElement !== b && b.focus());
   }
 
   // The console: one line of text to say, put on a sign, or broadcast. Tab switches.
@@ -568,7 +606,10 @@ async function main(): Promise<void> {
     if (document.activeElement instanceof HTMLInputElement && ["text", "password"].includes(document.activeElement.type)) {
       const list = buttons(overlayFor(screen)!);
       const at = list.indexOf(document.activeElement as HTMLElement);
-      if (e.code === "Enter" || e.code === "NumpadEnter") joinServer();
+      if (e.code === "Enter" || e.code === "NumpadEnter") {
+        if (screen === "worlds") newWorld();
+        else joinServer();
+      }
       else if (e.code === "Escape") show("menu");
       else if (e.code === "ArrowDown") list[(at + 1) % list.length]?.focus();
       else if (e.code === "ArrowUp") list[(at - 1 + list.length) % list.length]?.focus();
@@ -618,7 +659,13 @@ async function main(): Promise<void> {
   document.addEventListener("visibilitychange", () => document.hidden && saveGame());
   window.addEventListener("pagehide", saveGame);
 
-  show("menu");
+  // A link with a seed opens on the singleplayer screen, with the seed ready to start.
+  const linked = seedFromLink();
+  if (linked) {
+    newSeed.value = linked;
+    show("worlds", true);
+    newSeed.focus();
+  } else show("menu");
   let last = performance.now();
   /** The stack sizes last sent to a shared world's server. */
   let sentStacks = "";
@@ -633,10 +680,11 @@ async function main(): Promise<void> {
       if (game!.shared) {
         const p = game!.player;
         (game!.shared as Net).sendMove(p.x, p.y, p.facing);
-        // The server unloads a player's stack when they leave, so it hears about every
-        // change to the stacks at once, in case the page is closed right after.
+        // The server unloads a player's stack when they leave, and works out the strength of
+        // their swings from it, so it hears about every change to the stacks (and to the
+        // stack's size) at once.
         const h = game!.history;
-        const stacks = `${h.undoStack.length} ${h.redoStack.length}`;
+        const stacks = `${h.undoStack.length} ${h.redoStack.length} ${game!.stackLimit}`;
         if (stacks !== sentStacks) {
           sentStacks = stacks;
           saveGame();
