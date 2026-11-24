@@ -1,5 +1,6 @@
 import type { Game, Peer, Shared } from "./game";
-import type { Change, ClientMessage, Facing, PlayerState, ServerMessage } from "./protocol";
+import type { Look } from "./looks";
+import type { Change, ClientMessage, Facing, PlayerInfo, PlayerState, ServerMessage } from "./protocol";
 import { World } from "./world";
 
 /** How often this player's position is sent, at most (ms). */
@@ -45,8 +46,8 @@ export class Net implements Shared {
     });
   }
 
-  /** Connect and join as `name`. Rejects with a short reason if that doesn't work. */
-  static join(url: string, name: string, password: string): Promise<Joined> {
+  /** Connect and join as `name`, looking like `look`. Rejects with a short reason if that doesn't work. */
+  static join(url: string, name: string, password: string, look: Look): Promise<Joined> {
     return new Promise((resolve, reject) => {
       let socket: WebSocket;
       try {
@@ -56,7 +57,7 @@ export class Net implements Shared {
         return;
       }
       let settled = false;
-      socket.addEventListener("open", () => socket.send(JSON.stringify({ t: "hello", name, password } satisfies ClientMessage)));
+      socket.addEventListener("open", () => socket.send(JSON.stringify({ t: "hello", name, password, look } satisfies ClientMessage)));
       socket.addEventListener("error", () => {
         if (!settled) reject(new Error("can't reach server"));
         settled = true;
@@ -202,6 +203,6 @@ export class Net implements Shared {
   }
 }
 
-function peerFrom(p: { id: number; name: string; x: number; y: number; facing: Facing }): Peer {
-  return { id: p.id, name: p.name, x: p.x, y: p.y, facing: p.facing, drawX: p.x, drawY: p.y, speech: undefined };
+function peerFrom(p: PlayerInfo): Peer {
+  return { id: p.id, name: p.name, x: p.x, y: p.y, facing: p.facing, look: p.look, drawX: p.x, drawY: p.y, speech: undefined };
 }

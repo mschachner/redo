@@ -11,8 +11,9 @@
  * clock (which runs while anyone is online). Resting at the campfire puts a player to
  * sleep; morning comes at midnight, or as soon as everyone online is asleep.
  *
- * Each player's own state (position, health, inventory, stacks) is kept by name between
- * visits. The world, the clock and those states are saved to a JSON file every so often
+ * Each player's own state (position, health, inventory) is kept by name between visits.
+ * Logging out unloads a player's stack: everything on it is undone, as if they had pressed
+ * undo until it was empty. The world, the clock and those states are saved to a JSON file every so often
  * and on shutdown.
  *
  * Settings, from the environment:
@@ -26,9 +27,10 @@ import { createReadStream, existsSync, mkdirSync, readFileSync, renameSync, stat
 import { createServer } from "node:http";
 import { dirname, extname, join, normalize, resolve } from "node:path";
 import { WebSocket, WebSocketServer } from "ws";
-import { Block, BLOCKS } from "../src/blocks";
+import { Block, BLOCKS, isSolid } from "../src/blocks";
 import { BEDTIME, DAY_SECONDS, LAMP, START_HOUR, sunLevel } from "../src/clock";
 import { LightField } from "../src/light";
+import { readLook } from "../src/looks";
 import { attackArea, MONSTER_KINDS, Population, SPAWN_RANGE_X, SPAWN_RANGE_Y, spawnCap, spawnInterval } from "../src/population";
 import { MAX_NAME, MAX_TEXT } from "../src/protocol";
 import type { Change, ClientMessage, Facing, MonsterInfo, PlayerInfo, PlayerState, ServerMessage } from "../src/protocol";
@@ -177,10 +179,10 @@ const sendAll = (message: ServerMessage, except?: number): void => {
   const data = JSON.stringify(message);
   for (const p of players.values()) if (p.id !== except && p.socket.readyState === WebSocket.OPEN) p.socket.send(data);
 };
-const info = (p: Player): PlayerInfo => ({ id: p.id, name: p.name, x: p.x, y: p.y, facing: p.facing });
+const info = (p: Player): PlayerInfo => ({ id: p.id, name: p.name, x: p.x, y: p.y, facing: p.facing, look: p.look });
 const FACINGS: Facing[] = ["up", "down", "left", "right"];
 
-function welcome(socket: WebSocket, rawName: unknown, password: unknown): Player | undefined {
+function welcome(socket: WebSocket, rawName: unknown, password: unknown, look: unknown): Player | undefined {
   if (PASSWORD && password !== PASSWORD) {
     send(socket, { t: "refused", reason: "wrong password" });
     return undefined;
@@ -203,6 +205,7 @@ function welcome(socket: WebSocket, rawName: unknown, password: unknown): Player
     x: kept?.x ?? world.spawnX,
     y: kept?.y ?? world.spawnY,
     facing: kept?.facing ?? "right",
+    look: readLook(look),
     socket,
     asleep: false,
     touchableAt: Date.now() + INVULNERABLE_MS,
@@ -272,6 +275,42 @@ function handle(player: Player, m: ClientMessage): void {
       }
       break;
   }
+}
+
+/** Whether a 1×1 player at (x, y) overlaps cell (cx, cy). */
+const overlaps = (x: number, y: number, cx: number, cy: number): boolean =>
+  x < cx + 1 - 1e-6 && x + 1 > cx + 1e-6 && y < cy + 1 - 1e-6 && y + 1 > cy + 1e-6;
+
+/**
+ * Unload a player's stack as they log out: undo each action on it, most recent first, and
+ * drop the redo stack. An action that can't be undone any more stays as it is: its cells
+ * have changed since, a block would come back where someone is standing, or the blocks it
+ * would take back aren't in the inventory. Returns the changes made, for everyone else.
+ */
+function unload(state: PlayerState): Change[] {
+  const counts = new Map(state.inventory);
+  const made: Change[] = [];
+  for (let i = state.undo.length - 1; i >= 0; i--) {
+    const a = state.undo[i];
+    const changes = readChanges(
+      (a.cells ?? []).map(([x, y, before, after, beforeText]) => ({ x, y, from: after, to: before, text: beforeText ?? undefined })),
+    );
+    if (!changes) continue;
+    if (changes.some((c) => isSolid(c.to) && [...players.values()].some((p) => overlaps(p.x, p.y, c.x, c.y)))) continue;
+    if ((a.inventory ?? []).some(([b, n]) => (counts.get(b) ?? 0) - n < 0)) continue;
+    if (!applyChanges(changes)) continue;
+    for (const [b, n] of a.inventory ?? []) counts.set(b, (counts.get(b) ?? 0) - n);
+    made.push(...changes);
+  }
+  // Counts change in place, so the inventory keeps its order; blocks taken back go last.
+  const order = state.inventory.map(([b]) => b);
+  for (const b of counts.keys()) if (!order.includes(b)) order.push(b);
+  state.inventory = order.map((b) => [b, counts.get(b) ?? 0]);
+  if (state.selected !== null && (counts.get(state.selected) ?? 0) <= 0) state.selected = null;
+  state.undo = [];
+  state.redo = [];
+  dirty = true;
+  return made;
 }
 
 // ── The clock ──────────────────────────────────────────────────────────
@@ -379,7 +418,10 @@ const TYPES: Record<string, string> = {
 
 const http = createServer((req, res) => {
   if (req.url === "/info") {
-    res.writeHead(200, { "Content-Type": "application/json" }).end(JSON.stringify({ password: !!PASSWORD }));
+    // Pages hosted elsewhere (the copy on mark-schachner.com) ask this too.
+    res
+      .writeHead(200, { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" })
+      .end(JSON.stringify({ password: !!PASSWORD }));
     return;
   }
   const path = normalize(decodeURIComponent(new URL(req.url ?? "/", "http://x").pathname));
@@ -408,7 +450,7 @@ sockets.on("connection", (socket) => {
       return;
     }
     if (!player) {
-      if (m.t === "hello") player = welcome(socket, m.name, m.password);
+      if (m.t === "hello") player = welcome(socket, m.name, m.password, m.look);
       return;
     }
     handle(player, m);
@@ -417,6 +459,14 @@ sockets.on("connection", (socket) => {
     if (!player) return;
     players.delete(player.id);
     sendAll({ t: "left", id: player.id });
+    const state = states.get(player.key);
+    if (state?.undo?.length) {
+      const changes = unload(state);
+      if (changes.length) sendAll({ t: "changes", by: player.id, changes });
+    } else if (state?.redo?.length) {
+      state.redo = [];
+      dirty = true;
+    }
     sendClock();
     if (everyoneAsleep()) morning();
     console.log(`${player.name} left (${players.size} online)`);

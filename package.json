@@ -8,7 +8,9 @@
     "server": "npm run build:server && node dist-server/server.mjs",
     "build": "tsc --noEmit && tsc --noEmit -p server && vite build && npm run build:server",
     "build:server": "rolldown server/main.ts -o dist-server/server.mjs -p node -e bufferutil,utf-8-validate",
-    "deploy": "deploy/cuboid.sh",
+    "deploy": "deploy/cuboid.sh && deploy/site.sh",
+    "deploy:cuboid": "deploy/cuboid.sh",
+    "deploy:site": "deploy/site.sh",
     "preview": "vite preview"
   },
   "devDependencies": {

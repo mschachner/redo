@@ -4,7 +4,9 @@ import { Game } from "./game";
 const COMMS = ["say", "sign", "broadcast"] as const;
 type Comms = (typeof COMMS)[number];
 import { Input } from "./input";
+import { CHARACTERS, COLORS, faviconSvg, GLOWS, readLook, type Look } from "./looks";
 import { Net } from "./net";
+import { Picker } from "./picker";
 import { exportState, importState } from "./playerstate";
 import { Renderer } from "./render";
 import { normalizeSeed, randomSeedName } from "./seeds";
@@ -21,6 +23,12 @@ import {
   worldName,
 } from "./save";
 import { World } from "./world";
+
+/**
+ * The multiplayer server: the one named when the page was built (VITE_REDO_SERVER, for a
+ * page hosted elsewhere, like the copy on mark-schachner.com), else the one it came from.
+ */
+const SERVER = new URL(import.meta.env.VITE_REDO_SERVER || location.origin);
 
 /** A seed given in the page URL (?seed=…), if any. */
 function seedFromUrl(): string | undefined {
@@ -57,7 +65,7 @@ function bindSetting(id: string, key: string, fallback: boolean, apply: (on: boo
   });
 }
 
-type Screen = "menu" | "worlds" | "join" | "settings" | "save-prompt" | "playing";
+type Screen = "menu" | "pause" | "worlds" | "join" | "character" | "settings" | "save-prompt" | "playing";
 
 /** How far holding minus zooms out (cell size relative to normal). */
 const MIN_ZOOM = 0.5;
@@ -77,6 +85,15 @@ function playedAgo(t: number): string {
   return new Date(t).toLocaleDateString("en-US", { month: "short", day: "numeric" });
 }
 
+/** The look chosen on the character screen, remembered in this browser. */
+function storedLook(): Look {
+  try {
+    return readLook(JSON.parse(localStorage.getItem("redo.look") ?? "null"));
+  } catch {
+    return readLook(null);
+  }
+}
+
 async function main(): Promise<void> {
   await document.fonts.load('16px "Atkinson Hyperlegible Mono"').catch(() => undefined);
 
@@ -84,6 +101,7 @@ async function main(): Promise<void> {
   const input = new Input(window);
   const renderer = new Renderer(canvas);
   let autoStep = true;
+  let look = storedLook();
 
   /** The world being played; undefined until one is started or loaded. */
   let game: Game | undefined;
@@ -116,6 +134,8 @@ async function main(): Promise<void> {
 
   let backgroundDrawn = false;
   const menu = document.getElementById("menu")!;
+  const pause = document.getElementById("pause")!;
+  const character = document.getElementById("character")!;
   const worlds = document.getElementById("worlds")!;
   const worldList = document.getElementById("world-list")!;
   const worldsHint = worlds.querySelector(".worlds-hint")!;
@@ -128,7 +148,6 @@ async function main(): Promise<void> {
   const joinPasswordField = document.getElementById("join-password-field")!;
   const joinPassword = document.getElementById("join-password") as HTMLInputElement;
   const savePromptName = document.getElementById("save-prompt-name")!;
-  const seedLine = document.getElementById("seed")!;
   const seedText = document.getElementById("seed-text")!;
   const seedLabel = document.getElementById("seed-label")!;
   /** Copy the current world's seed, and say so on the seed line for a moment. */
@@ -145,19 +164,20 @@ async function main(): Promise<void> {
       .catch(() => undefined);
   };
   seedText.addEventListener("click", copySeed);
-  const resume = menu.querySelector<HTMLButtonElement>('[data-action="resume"]')!;
   let screen: Screen = "menu";
+  /** Where Settings goes back to: the main menu or the pause menu. */
+  let settingsFrom: Screen = "menu";
 
   /** Show a screen. The menus show the paused game behind them, or the demo world. */
   const show = (next: Screen): void => {
     screen = next;
     menu.classList.toggle("hidden", next !== "menu");
+    pause.classList.toggle("hidden", next !== "pause");
+    character.classList.toggle("hidden", next !== "character");
     worlds.classList.toggle("hidden", next !== "worlds");
     settings.classList.toggle("hidden", next !== "settings");
     savePrompt.classList.toggle("hidden", next !== "save-prompt");
     join.classList.toggle("hidden", next !== "join");
-    resume.hidden = !game;
-    seedLine.hidden = !game;
     renderer.hud = next === "playing";
     renderer.zoom = 1;
     input.enabled = next === "playing";
@@ -169,7 +189,7 @@ async function main(): Promise<void> {
     // the join screen, in the name field.
     if (next === "join") {
       // Ask for a password only if the server wants one.
-      fetch("/info")
+      fetch(new URL("/info", SERVER))
         .then((r) => r.json() as Promise<{ password: boolean }>)
         .then((info) => (joinPasswordField.hidden = !info.password))
         .catch(() => undefined);
@@ -182,7 +202,11 @@ async function main(): Promise<void> {
   const overlayFor = (s: Screen): HTMLElement | undefined =>
     s === "menu"
       ? menu
-      : s === "worlds"
+      : s === "pause"
+        ? pause
+        : s === "character"
+          ? character
+          : s === "worlds"
         ? worlds
         : s === "join"
           ? join
@@ -217,6 +241,7 @@ async function main(): Promise<void> {
     game = g;
     gameId = id;
     gameName = name;
+    game.look = look;
     openedAs = id ? snapshot(id) : undefined;
     game.autoStep = autoStep;
     if (!g.shared) showSeedInUrl(g.world.seedName);
@@ -225,6 +250,16 @@ async function main(): Promise<void> {
     game.light = renderer.light;
     (window as unknown as { game: Game }).game = game; // for poking at from the console
     show("playing");
+  };
+
+  /** Leave the world being played (saved, or for a shared one, left) for the main menu. */
+  const exitWorld = (): void => {
+    saveGame();
+    if (game?.shared) (game.shared as Net).close();
+    game = undefined;
+    gameId = undefined;
+    backgroundDrawn = false;
+    show("menu");
   };
 
   /** Start a fresh world and play it. */
@@ -252,7 +287,7 @@ async function main(): Promise<void> {
     startWorld(randomSeedName());
   };
 
-  /** Join the multiplayer server this page came from, under the name in the join form. */
+  /** Join the multiplayer server, under the name in the join form. */
   let joining = false;
   const joinServer = (): void => {
     const name = joinName.value.trim();
@@ -267,8 +302,9 @@ async function main(): Promise<void> {
     }
     joining = true;
     joinStatus.textContent = "";
-    const url = `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws`;
-    Net.join(url, name, joinPassword.value)
+    const url = new URL("/ws", SERVER);
+    url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+    Net.join(url.href, name, joinPassword.value, look)
       .then(({ net, world, peers, you, hour, day }) => {
         saveGame(); // the singleplayer world being left, if any
         const g = new Game(world, input);
@@ -298,6 +334,55 @@ async function main(): Promise<void> {
     // Storage unavailable: start empty.
   }
   joinForm.addEventListener("submit", (e) => e.preventDefault()); // Enter is handled with the other keys
+
+  // The character screen: each option is drawn as the character would look with it.
+  const glowShadow = (glow: string): string => `0 0 1px ${glow}, 0 0 2px ${glow}, 0 0 3px ${glow}, 0 0 7px ${glow}`;
+  const drawLook = (option: HTMLElement, l: Look): void => {
+    option.textContent = l.character;
+    option.style.color = l.color;
+    option.style.textShadow = glowShadow(l.glow);
+  };
+  const favicon = document.getElementById("favicon") as HTMLLinkElement;
+  const showLook = (): void => {
+    favicon.href = `data:image/svg+xml,${encodeURIComponent(faviconSvg(look))}`;
+    for (const p of pickers) p.redraw();
+  };
+  const setLook = (next: Look): void => {
+    look = next;
+    try {
+      localStorage.setItem("redo.look", JSON.stringify(look));
+    } catch {
+      // Storage unavailable: the look lasts for this visit only.
+    }
+    showLook();
+  };
+  const picker = <T,>(id: string, choices: readonly T[], chosen: T, draw: (c: T, o: HTMLElement) => void, change: (c: T) => Look): Picker<T> =>
+    new Picker(document.getElementById(id)!, choices, chosen, draw, (c) => setLook(change(c)));
+  const pickers: Picker<unknown>[] = [
+    picker("pick-glyph", CHARACTERS, look.character, (c, o) => drawLook(o, { ...look, character: c }), (c) => ({ ...look, character: c })),
+    picker(
+      "pick-color",
+      COLORS,
+      COLORS.find((c) => c.hex === look.color)!,
+      (c, o) => {
+        drawLook(o, { ...look, color: c.hex });
+        o.title = c.name;
+      },
+      (c) => ({ ...look, color: c.hex }),
+    ),
+    picker(
+      "pick-glow",
+      GLOWS,
+      GLOWS.find((g) => g.hex === look.glow)!,
+      (g, o) => {
+        drawLook(o, { ...look, glow: g.hex });
+        o.style.background = g.hex;
+        o.title = g.name;
+      },
+      (g) => ({ ...look, glow: g.hex }),
+    ),
+  ] as Picker<unknown>[];
+  showLook();
 
   /** Load a saved world and play it. */
   const openWorld = (meta: WorldMeta): void => {
@@ -356,7 +441,7 @@ async function main(): Promise<void> {
           if (e.code === "KeyX" && !e.repeat) askDelete();
         });
         row.addEventListener("blur", disarm);
-        row.addEventListener("mouseenter", () => row.focus());
+        row.addEventListener("mousemove", () => document.activeElement !== row && row.focus());
         return row;
       }),
     );
@@ -364,9 +449,9 @@ async function main(): Promise<void> {
   };
 
   /** The items of a menu screen that keyboard navigation moves between. */
-  const buttons = (overlay: HTMLElement): (HTMLButtonElement | HTMLInputElement)[] =>
-    [...overlay.querySelectorAll<HTMLButtonElement | HTMLInputElement>(".field input, .toggles input, .choices button")].filter(
-      (b) => !b.disabled && !b.hidden,
+  const buttons = (overlay: HTMLElement): HTMLElement[] =>
+    [...overlay.querySelectorAll<HTMLElement>(".field input, .toggles input, .picker, .choices button")].filter(
+      (b) => !(b as HTMLButtonElement).disabled && !b.hidden && !b.closest("[hidden]"),
     );
 
   const act = (action: string | undefined): void => {
@@ -374,11 +459,10 @@ async function main(): Promise<void> {
       saveGame(); // so the world being played is listed as it is now
       show("worlds");
     } else if (action === "multiplayer") {
-      if (game?.shared) show("playing");
-      else {
-        joinStatus.textContent = "";
-        show("join");
-      }
+      joinStatus.textContent = "";
+      show("join");
+    } else if (action === "character") {
+      show("character");
     } else if (action === "join") {
       joinServer();
     } else if (action === "new-world") {
@@ -388,12 +472,18 @@ async function main(): Promise<void> {
     else if (action === "discard-new") discardAndStart();
     else if (action === "cancel-new") show("playing");
     else if (action === "resume" && game) show("playing");
-    else if (action === "settings") show("settings");
-    else if (action === "back") show("menu");
+    else if (action === "exit") exitWorld();
+    else if (action === "settings") {
+      settingsFrom = screen;
+      show("settings");
+    } else if (action === "back") show(screen === "settings" ? settingsFrom : "menu");
   };
   for (const b of document.querySelectorAll<HTMLButtonElement>(".choices button[data-action]")) {
     b.addEventListener("click", () => act(b.dataset.action));
-    b.addEventListener("mouseenter", () => !b.disabled && b.focus());
+    // Pointing at an item focuses it, on real movement only: the browser also reports the
+    // pointer entering whatever the layout moves under it, which shouldn't take the place of
+    // the keyboard.
+    b.addEventListener("mousemove", () => !b.disabled && document.activeElement !== b && b.focus());
   }
 
   // The console: one line of text to say, put on a sign, or broadcast. Tab switches.
@@ -459,7 +549,7 @@ async function main(): Promise<void> {
     if (screen === "playing") {
       if (e.code === "Escape") {
         saveGame();
-        show("menu");
+        show("pause");
       } else if (e.code === "KeyR" && !e.repeat && !game?.shared) {
         // Ask whether to keep this world first, unless there's nothing in it to keep.
         if (worthSaving()) {
@@ -476,9 +566,12 @@ async function main(): Promise<void> {
     // In a text field, keys type; only Enter (join), Esc (back) and the arrow keys (move
     // on) do more.
     if (document.activeElement instanceof HTMLInputElement && ["text", "password"].includes(document.activeElement.type)) {
+      const list = buttons(overlayFor(screen)!);
+      const at = list.indexOf(document.activeElement as HTMLElement);
       if (e.code === "Enter" || e.code === "NumpadEnter") joinServer();
       else if (e.code === "Escape") show("menu");
-      else if (e.code === "ArrowDown") buttons(overlayFor(screen)!)[0]?.focus();
+      else if (e.code === "ArrowDown") list[(at + 1) % list.length]?.focus();
+      else if (e.code === "ArrowUp") list[(at - 1 + list.length) % list.length]?.focus();
       else return;
       e.preventDefault();
       return;
@@ -486,7 +579,14 @@ async function main(): Promise<void> {
     // Menus: J and K (or W/S, or the arrow keys) move down and up; Enter picks.
     const overlay = overlayFor(screen)!;
     const list = buttons(overlay);
-    const at = list.indexOf(document.activeElement as HTMLButtonElement | HTMLInputElement);
+    const at = list.indexOf(document.activeElement as HTMLElement);
+    // On a picker, A and D (or the left and right arrows) change the choice.
+    const picking = pickers.find((p) => p.element === document.activeElement);
+    if (picking && (e.code === "ArrowLeft" || e.code === "KeyA" || e.code === "ArrowRight" || e.code === "KeyD")) {
+      picking.move(e.code === "ArrowLeft" || e.code === "KeyA" ? -1 : 1);
+      e.preventDefault();
+      return;
+    }
     if (e.code === "ArrowDown" || e.code === "KeyS" || e.code === "KeyJ") {
       list[(at + 1) % list.length]?.focus();
       e.preventDefault();
@@ -494,16 +594,20 @@ async function main(): Promise<void> {
       list[(at - 1 + list.length) % list.length]?.focus();
       e.preventDefault();
     } else if (e.code === "Enter" || e.code === "NumpadEnter") {
-      // Enter picks a button and toggles a checkbox; with nothing selected, it selects the first item.
-      if (at >= 0) list[at].click();
+      // Enter picks a button and toggles a checkbox (on a picker, it moves on); with nothing
+      // selected, it selects the first item.
+      if (picking) list[at + 1]?.focus();
+      else if (at >= 0) list[at].click();
       else list[0]?.focus();
       e.preventDefault();
     } else if (e.code === "Space") {
       e.preventDefault(); // Enter is the one key that picks
-    } else if (e.code === "KeyC" && screen === "menu" && game) {
+    } else if (e.code === "KeyC" && screen === "pause") {
       copySeed();
-    } else if (e.code === "Escape" && screen === "save-prompt") {
+    } else if (e.code === "Escape" && (screen === "save-prompt" || screen === "pause")) {
       show("playing");
+    } else if (e.code === "Escape" && screen === "settings") {
+      show(settingsFrom);
     } else if (e.code === "Escape" && screen !== "menu") {
       show("menu");
     }
@@ -516,6 +620,8 @@ async function main(): Promise<void> {
 
   show("menu");
   let last = performance.now();
+  /** The stack sizes last sent to a shared world's server. */
+  let sentStacks = "";
   const frame = (now: number) => {
     // Scheduled first, so an error in one frame can't stop the game.
     requestAnimationFrame(frame);
@@ -527,6 +633,14 @@ async function main(): Promise<void> {
       if (game!.shared) {
         const p = game!.player;
         (game!.shared as Net).sendMove(p.x, p.y, p.facing);
+        // The server unloads a player's stack when they leave, so it hears about every
+        // change to the stacks at once, in case the page is closed right after.
+        const h = game!.history;
+        const stacks = `${h.undoStack.length} ${h.redoStack.length}`;
+        if (stacks !== sentStacks) {
+          sentStacks = stacks;
+          saveGame();
+        }
       }
       sinceSave += dt;
       // Resting commits the world, so it's a natural point to save it too.

@@ -129,6 +129,11 @@ body.hints .console-hint {
   box-shadow: 0 16px 48px rgba(0, 0, 0, 0.45);
 }
 
+/* A tighter card for a short list of options, like the main menu. */
+.plate.compact {
+  padding: 16px 32px 16px 20px;
+}
+
 .plate .controls td:last-child {
   color: #aea6b9;
 }
@@ -335,7 +340,7 @@ body.hints .worlds-hint.shown {
   color: var(--muted);
 }
 
-/* The current world's seed, under the main menu; clicking it (or pressing C) copies it. */
+/* The current world's seed, under the pause menu; clicking it (or pressing C) copies it. */
 .seed {
   display: flex;
   align-items: baseline;
@@ -376,9 +381,10 @@ body.hints .seed-hint {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
-  width: 20em;
+  width: 22em;
   gap: 12px;
   color: var(--muted);
+  white-space: nowrap;
 }
 
 .field[hidden] {
@@ -400,6 +406,71 @@ body.hints .seed-hint {
 
 .field input:focus {
   border-color: var(--accent);
+}
+
+/* A field that can't be changed yet, like the server name. */
+.field input:disabled {
+  color: var(--dim);
+  background: none;
+  border-style: dashed;
+  cursor: default;
+}
+
+/* Choosing a look: rows of options, each drawn as it would look in the game. The row takes
+   focus as a whole; A and D (or the arrow keys) move the choice. */
+.picker {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 20em;
+  color: var(--muted);
+  outline: none;
+  cursor: default;
+}
+
+.picker:focus .picker-label {
+  color: var(--accent);
+}
+
+.picker-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+}
+
+.picker-options span {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.45em;
+  height: 1.45em;
+  font-size: 17px;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  cursor: pointer;
+}
+
+.picker-options span:hover {
+  border-color: var(--dim);
+}
+
+.picker-options span[aria-checked="true"] {
+  border-color: var(--muted);
+}
+
+.picker:focus .picker-options span[aria-checked="true"] {
+  border-color: var(--accent);
+}
+
+.picker-hint {
+  display: none;
+  margin: -8px 0 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+body.hints .picker-hint {
+  display: block;
 }
 
 .join-status {

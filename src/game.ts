@@ -3,6 +3,7 @@ import { Action, CellChange, History } from "./history";
 import type { Change } from "./protocol";
 import { Input } from "./input";
 import type { LightField } from "./light";
+import { DEFAULT_LOOK, type Look } from "./looks";
 import { boxesOverlap, Monster } from "./monsters";
 import { attackArea, HIT_KNOCKBACK, MONSTER_KINDS, Population, spawnCap, spawnInterval } from "./population";
 import { BEDTIME, DAY_SECONDS, SLEEPY_HOUR, START_HOUR } from "./clock";
@@ -37,6 +38,7 @@ export interface Peer {
   x: number;
   y: number;
   facing: Dir;
+  look: Look;
   /** Drawn position, easing toward (x, y) between reports. */
   drawX: number;
   drawY: number;
@@ -230,6 +232,8 @@ export class Game {
   shared: Shared | undefined;
   /** The other players, in a shared world. */
   peers: Peer[] = [];
+  /** How this player appears: chosen when joining a shared world, the default alone. */
+  look: Look = DEFAULT_LOOK;
   /** While a change waits for the server, new actions are ignored. */
   private busy = false;
   /** While dying undoes the stack, other actions are ignored. */

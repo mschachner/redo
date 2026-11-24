@@ -2,6 +2,7 @@ import { Block, BLOCKS, RGB } from "./blocks";
 import { BEDTIME, daylight, LAMP, sunLevel } from "./clock";
 import { BASE_STACK, Dir, Game, MAX_HP, REST_FADE, SWING_TIME } from "./game";
 import { LightField, MAX_LIGHT } from "./light";
+import type { Look } from "./looks";
 import { MONSTERS } from "./monsters";
 import { regionName } from "./names";
 import { BIOMES } from "./biomes";
@@ -63,9 +64,6 @@ const COLOR = {
   full: "#e0786a",
   daySlot: "#2f5a60",
 };
-
-/** Other players' colors, picked by id. */
-const PEER_COLORS = ["#8fd3ff", "#ffb3c7", "#b8f28c", "#ffd27a", "#c9a7ff", "#7fe8d0", "#ff9f80", "#e8e08a"];
 
 /** Each facing's edge of the player's 1×1 box, as a segment [x1, y1, x2, y2]. */
 const CURSOR_EDGE: Record<Dir, readonly number[]> = {
@@ -548,13 +546,12 @@ export class Renderer {
       this.outlinedText(MONSTERS[m.kind].glyph, this.snap(sx(mx)) + cell / 2, this.snap(sy(my)) + cell / 2 + 1);
     }
 
-    // Other players: an @ in their own color, with their name and anything they've said.
+    // Other players: their own character, with their name and anything they've said.
     for (const peer of game.peers) {
       const qx = this.snap((peer.drawX - camX) * cell);
       const qy = this.snap((peer.drawY - camY) * cell);
       if (qx < -cell * 8 || qx > cols * cell + cell * 8 || qy < -cell * 4 || qy > rows * cell + cell) continue;
-      ctx.fillStyle = PEER_COLORS[peer.id % PEER_COLORS.length];
-      this.outlinedText("@", qx + cell / 2, qy + cell / 2 + 1);
+      this.character(peer.look, qx + cell / 2, qy + cell / 2 + 1);
       ctx.save();
       ctx.font = `${Math.round(cell * 0.55)}px ${FONT}`;
       ctx.fillStyle = COLOR.player;
@@ -567,10 +564,7 @@ export class Renderer {
     const ppx = this.snap((px - camX) * cell);
     const ppy = this.snap((py - camY) * cell);
     const blinkOff = Math.floor(game.player.invulnerable * 12) % 2 === 1;
-    if (!blinkOff) {
-      ctx.fillStyle = COLOR.player;
-      this.outlinedText("@", ppx + cell / 2, ppy + cell / 2 + 1);
-    }
+    if (!blinkOff) this.character(game.look, ppx + cell / 2, ppy + cell / 2 + 1);
 
     // Attack swing: a short arc on the facing side, fading out.
     if (game.swing) {
@@ -843,6 +837,22 @@ export class Renderer {
   }
 
   /** Text with a dark outline, so it reads on light and dark backgrounds alike. */
+  /** A player's character: its color, outlined in its glow and haloed by it. */
+  private character(look: Look, x: number, y: number): void {
+    const ctx = this.ctx;
+    ctx.save();
+    ctx.lineJoin = "round";
+    ctx.lineWidth = Math.max(3, this.cell * 0.22);
+    ctx.strokeStyle = look.glow;
+    ctx.shadowColor = look.glow;
+    ctx.shadowBlur = this.cell * 0.6;
+    ctx.strokeText(look.character, x, y);
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = look.color;
+    ctx.fillText(look.character, x, y);
+    ctx.restore();
+  }
+
   private outlinedText(text: string, x: number, y: number): void {
     const ctx = this.ctx;
     const fill = ctx.fillStyle;

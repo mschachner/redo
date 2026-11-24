@@ -3,6 +3,7 @@
  * Blocks travel as Block enum numbers, so the page and the server must be the same build.
  */
 import type { Block } from "./blocks";
+import type { Look } from "./looks";
 
 /** One cell's change: what it holds now and what it becomes. */
 export interface Change {
@@ -22,6 +23,7 @@ export interface PlayerInfo {
   x: number;
   y: number;
   facing: Facing;
+  look: Look;
 }
 
 /** An undoable action, for keeping on the server: cells as x, y, before, after, sign texts. */
@@ -52,7 +54,7 @@ export type MonsterInfo = [number, number, number, number, number, number];
 
 /** From the page to the server. */
 export type ClientMessage =
-  | { t: "hello"; name: string; password?: string }
+  | { t: "hello"; name: string; password?: string; look?: Look }
   | { t: "move"; x: number; y: number; facing: Facing }
   | { t: "request"; id: number; changes: Change[] }
   | { t: "say"; text: string }

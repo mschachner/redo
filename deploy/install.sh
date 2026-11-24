@@ -32,6 +32,13 @@ sudo systemctl daemon-reload
 sudo systemctl enable --quiet redo
 sudo systemctl restart redo
 
+# Tailscale Funnel puts the server on the internet at https://cuboid.<tailnet>.ts.net, which
+# is where the page on mark-schachner.com joins. Set up once; it persists across reboots.
+if ! tailscale funnel status 2>/dev/null | grep -q '127.0.0.1:8787'; then
+  echo "== opening the server to the internet with Tailscale Funnel"
+  sudo tailscale funnel --bg 8787
+fi
+
 sleep 2
 systemctl is-active redo
 journalctl -u redo -n 4 --no-pager -o cat
