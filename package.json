@@ -1,0 +1,22 @@
+{
+  "name": "redo",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "server": "npm run build:server && node dist-server/server.mjs",
+    "build": "tsc --noEmit && tsc --noEmit -p server && vite build && npm run build:server",
+    "build:server": "rolldown server/main.ts -o dist-server/server.mjs -p node -e bufferutil,utf-8-validate",
+    "deploy": "deploy/cuboid.sh",
+    "preview": "vite preview"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "@types/ws": "^8.18.2",
+    "rolldown": "^1.2.19",
+    "typescript": "^5.9.0",
+    "vite": "^8.0.0",
+    "ws": "^8.23.0"
+  }
+}

@@ -1,0 +1,26 @@
+# The redo multiplayer server on cuboid. Installed by deploy/install.sh.
+# The game and server live in /srv/redo; the world is /srv/redo/data/world.json.
+# Optional settings (SEED for a new world, PASSWORD, PORT) go in /etc/default/redo.
+
+[Unit]
+Description=redo multiplayer server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=redo
+Group=redo
+WorkingDirectory=/srv/redo
+Environment=PORT=8787 DATA=/srv/redo/data/world.json STATIC=/srv/redo/dist
+EnvironmentFile=-/etc/default/redo
+ExecStart=/usr/bin/env node /srv/redo/server.mjs
+# The server saves the world on SIGTERM, which is what systemctl stop sends.
+Restart=on-failure
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/srv/redo/data
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,410 @@
+:root {
+  --page: #26252b;
+  --border: #34303d;
+  --muted: #7d7689;
+  --dim: #4a4554;
+  --text: #d9d1c3;
+  --accent: #f0c987;
+  --danger: #e0786a;
+  --mono: "Atkinson Hyperlegible Mono", ui-monospace, "SF Mono", Menlo, monospace;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  color: var(--text);
+  font-family: var(--mono);
+  /* Charcoal, with "Asfalt Dark" from transparenttextures.com over it. */
+  background: var(--page) url("/textures/asfalt-dark.png");
+}
+
+.stage {
+  min-height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+
+.frame {
+  position: relative;
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.55);
+}
+
+canvas {
+  display: block;
+}
+
+/* The one-line console for chat and signs, along the bottom of the view. */
+.console {
+  position: absolute;
+  left: 14px;
+  right: 14px;
+  bottom: 14px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  background: rgba(24, 22, 29, 0.94);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 15px;
+}
+
+.console.hidden {
+  display: none;
+}
+
+/* Sized to its text (the font is monospaced, so in ch), sliding between widths as Tab
+   cycles the mode, so the typing starts right after the prompt. */
+.console-label {
+  color: var(--accent);
+  white-space: nowrap;
+  overflow: hidden;
+  flex: none;
+  transition: width 0.12s ease-out;
+}
+
+.console-label::after {
+  content: "\00a0›";
+  color: var(--muted);
+}
+
+.console-label.waiting {
+  color: var(--muted);
+}
+
+/* Key hints in the page itself, shown when the keybind hints setting is on. */
+.console-hint {
+  display: none;
+  font-size: 12px;
+}
+
+body.hints .console-hint {
+  display: inline;
+}
+
+.console input {
+  flex: 1;
+  font: inherit;
+  color: var(--text);
+  background: none;
+  border: none;
+  outline: none;
+  caret-color: var(--accent);
+}
+
+/* Menus sit over the canvas, which keeps drawing the world behind them. */
+.overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 22px;
+  background: rgba(16, 15, 20, 0.5);
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
+  user-select: none;
+}
+
+/* A solid card for denser screens like Settings, so its text has steady contrast. */
+.plate {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 20px;
+  padding: 28px 40px 22px;
+  background: rgba(24, 22, 29, 0.94);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.45);
+}
+
+.plate .controls td:last-child {
+  color: #aea6b9;
+}
+
+.plate h3 {
+  color: #9a92a6;
+}
+
+.overlay.hidden {
+  display: none;
+}
+
+.title {
+  margin: 0 0 18px;
+  font-family: var(--mono);
+  font-size: 20px;
+  line-height: 1.15;
+  color: var(--accent);
+}
+
+.choices {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.choices button {
+  font: inherit;
+  font-size: 18px;
+  text-align: left;
+  color: var(--muted);
+  background: none;
+  border: none;
+  padding: 4px 8px;
+  cursor: pointer;
+  outline: none;
+}
+
+/* The selected item gets a terminal-style marker; the space keeps items aligned. */
+.choices button::before {
+  content: "  ";
+  white-space: pre;
+}
+
+.choices button:focus-visible,
+.choices button:focus,
+.choices button:hover:not(:disabled) {
+  color: var(--text);
+}
+
+.choices button:focus::before {
+  content: "> ";
+  color: var(--accent);
+}
+
+.choices button:disabled {
+  color: var(--dim);
+  cursor: default;
+}
+
+h2,
+h3 {
+  margin: 0;
+  font-weight: normal;
+  color: var(--accent);
+}
+
+h2 {
+  font-size: 20px;
+}
+
+h3 {
+  font-size: 15px;
+  color: var(--muted);
+}
+
+.toggles {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.toggles label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 15px;
+  cursor: pointer;
+}
+
+.toggles label:has(input:focus) {
+  color: var(--accent);
+}
+
+.toggles input {
+  accent-color: var(--accent);
+  margin: 0;
+}
+
+.controls {
+  border-collapse: collapse;
+  font-size: 14px;
+}
+
+.controls td {
+  padding: 3px 10px;
+}
+
+.controls td:first-child {
+  text-align: right;
+}
+
+.controls td:last-child {
+  color: var(--muted);
+}
+
+kbd {
+  font-family: var(--mono);
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid #514b5c;
+  border-radius: 4px;
+  padding: 0 5px;
+}
+
+/* Saved worlds: one row each, the name on the left and when it was played on the right. */
+.worlds-top {
+  width: 30em;
+  margin-bottom: -14px;
+}
+
+.world-list {
+  width: 30em;
+  max-height: 46vh;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--dim) transparent;
+}
+
+.world-list:empty {
+  display: none;
+}
+
+.world-list button {
+  display: flex;
+  align-items: baseline;
+  width: 100%;
+}
+
+.world-list .name {
+  flex: 1;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.world-list .meta {
+  margin-left: 12px;
+  font-size: 13px;
+  color: var(--dim);
+}
+
+.world-list button:focus .meta,
+.world-list button:hover .meta {
+  color: var(--muted);
+}
+
+/* The mouse's way to delete: a cross that appears on hover. */
+.world-list .delete {
+  margin-left: 8px;
+  width: 1.2em;
+  text-align: center;
+  color: transparent;
+}
+
+.world-list button:hover .delete {
+  color: var(--muted);
+}
+
+.world-list button:hover .delete:hover {
+  color: var(--danger);
+}
+
+/* Asked once to delete; asking again deletes. */
+.world-list button.armed,
+.world-list button.armed .meta,
+.world-list button.armed .delete {
+  color: var(--danger);
+}
+
+.worlds-hint {
+  display: none;
+  margin: -8px 0 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+body.hints .worlds-hint.shown {
+  display: block;
+}
+
+.world-name {
+  margin: -8px 0 0;
+  color: var(--muted);
+}
+
+/* The current world's seed, under the main menu; clicking it (or pressing C) copies it. */
+.seed {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin: 6px 0 0;
+  font-size: 14px;
+  color: var(--muted);
+}
+
+.seed[hidden] {
+  display: none;
+}
+
+#seed-text {
+  font: inherit;
+  color: var(--text);
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  outline: none;
+}
+
+#seed-text:hover {
+  color: var(--accent);
+}
+
+.seed-hint {
+  display: none;
+}
+
+body.hints .seed-hint {
+  display: inline;
+}
+
+/* The multiplayer join screen: a name field and a line for what went wrong. */
+.field {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  width: 20em;
+  gap: 12px;
+  color: var(--muted);
+}
+
+.field[hidden] {
+  display: none;
+}
+
+.field input {
+  width: 12em;
+  font: inherit;
+  font-size: 18px;
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px 8px;
+  outline: none;
+  caret-color: var(--accent);
+}
+
+.field input:focus {
+  border-color: var(--accent);
+}
+
+.join-status {
+  min-height: 1.2em;
+  margin: -8px 0 0;
+  font-size: 14px;
+  color: var(--danger);
+}
