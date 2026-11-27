@@ -20,7 +20,8 @@ sudo install -d -m 755 /srv/redo
 sudo install -d -m 750 -o redo -g redo /srv/redo/data
 
 # A seed given to the deploy is kept for the server's first start, if there's no world yet.
-if [[ -n "${SEED:-}" && ! -e /srv/redo/data/world.json ]]; then
+# (Only the redo user can look in /srv/redo/data, so the check needs sudo.)
+if [[ -n "${SEED:-}" ]] && ! sudo test -e /srv/redo/data/world.json; then
   sudo touch /etc/default/redo
   sudo sed -i '/^SEED=/d' /etc/default/redo
   echo "SEED=$SEED" | sudo tee -a /etc/default/redo >/dev/null
@@ -34,12 +35,8 @@ sudo systemctl daemon-reload
 sudo systemctl enable --quiet redo
 sudo systemctl restart redo
 
-# Tailscale Funnel puts the server on the internet at https://cuboid.<tailnet>.ts.net, which
-# is where the page on mark-schachner.com joins. Set up once; it persists across reboots.
-if ! tailscale funnel status 2>/dev/null | grep -q '127.0.0.1:8787'; then
-  echo "== opening the server to the internet with Tailscale Funnel"
-  sudo tailscale funnel --bg 8787
-fi
+# The server is reached from outside at https://redo.mark-schachner.com, through Caddy and
+# the Cloudflare tunnel on cuboid (set up outside this repo).
 
 sleep 2
 systemctl is-active redo

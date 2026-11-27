@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # Build the copy of redo served at mark-schachner.com/redo, put it in the site repo's redo/
-# folder, and commit and push it; GitHub Pages does the rest (npm run deploy:site).
+# folder, and commit and push it; cuboid serves it from there (npm run deploy:site).
 #   SITE=path    the site repo (default ~/code/projects/site)
-#   SERVER=url   the multiplayer server the page joins (default cuboid, through Tailscale Funnel)
+#   SERVER=url   the multiplayer server the page joins (default cuboid, through the Cloudflare tunnel)
 # The page and the server must be the same build, so npm run deploy updates both.
 set -euo pipefail
 site="${SITE:-$HOME/code/projects/site}"
-server="${SERVER:-https://cuboid.tail8d71a5.ts.net}"
+server="${SERVER:-https://redo.mark-schachner.com}"
 cd "$(dirname "$0")/.."
 
 npm install --no-audit --no-fund
@@ -22,4 +22,4 @@ if git -C "$site" diff --cached --quiet -- redo; then
 fi
 git -C "$site" commit -q -m "Deploy redo" -- redo
 git -C "$site" push -q
-echo "pushed: https://mark-schachner.com/redo/ updates once GitHub Pages rebuilds (a minute or so)"
+echo "pushed: https://mark-schachner.com/redo/ updates once cuboid pulls the site (within 2 minutes)"

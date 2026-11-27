@@ -14,4 +14,4 @@ ssh "$host" 'mkdir -p ~/redo-release'
 rsync -a --delete dist/ "$host:redo-release/dist/"
 rsync -a dist-server/server.mjs deploy/redo.service deploy/install.sh "$host:redo-release/"
 ssh -t "$host" "SEED='${SEED:-}' bash ~/redo-release/install.sh"
-echo "redo is up at http://$host:8787 and https://cuboid.tail8d71a5.ts.net"
+echo "redo is up at http://$host:8787 and https://redo.mark-schachner.com"
